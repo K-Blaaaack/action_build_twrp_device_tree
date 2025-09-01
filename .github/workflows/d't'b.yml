@@ -1,0 +1,83 @@
+# This is a basic workflow to help you get started with Actions
+
+name: CI
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow on push or pull request events but only for the "master" branch
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+ extract-dtb:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Download images
+        run: |
+          # 替换成你实际的下载方式
+          wget -O boot.img https://example.com/path/to/boot.img || true
+          wget -O dtbo.img https://example.com/path/to/dtbo.img || true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git wget device-tree-compiler
+
+      - name: Build magiskboot
+        run: |
+          git clone https://github.com/topjohnwu/magiskboot.git
+          cd magiskboot
+          make
+          sudo cp magiskboot /usr/local/bin/
+
+      - name: Try unpack boot.img
+        run: |
+          if [ -f boot.img ]; then
+            echo "Unpacking boot.img..."
+            magiskboot unpack boot.img || true
+          fi
+
+      - name: Handle dtb from boot.img
+        run: |
+          if [ -f "dtb" ]; then
+            echo "Found dtb in boot.img"
+            cp dtb boot_extracted.dtb
+            dtc -I dtb -O dts -o boot_extracted.dts boot_extracted.dtb
+          else
+            echo "No dtb found in boot.img"
+          fi
+
+      - name: Handle dtbo.img
+        run: |
+          if [ -f dtbo.img ]; then
+            echo "Extracting dtbo.img..."
+            mkdir -p dtbo_extracted
+            git clone https://android.googlesource.com/platform/system/libufdt
+            cd libufdt/utils
+            make dtc extract_dtb
+            cd ../../
+            ./libufdt/utils/extract_dtb dtbo.img dtbo_extracted/
+            for f in dtbo_extracted/*.dtb; do
+              dtc -I dtb -O dts -o "${f%.dtb}.dts" "$f"
+            done
+          else
+            echo "No dtbo.img found"
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: device-tree
+          path: |
+            boot_extracted.dtb
+            boot_extracted.dts
+            dtbo_extracted/*
